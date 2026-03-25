@@ -1,21 +1,22 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import json
 
-# ---------------- LOAD DATABASE (FROM GITHUB REPO FILE) ---------------- #
 import zipfile
 import json
+import requests
+import io
+import streamlit as st
 
 @st.cache_data
 def load_database():
-    with zipfile.ZipFile("MoNA-export-GC-MS_Spectra.zip", 'r') as z:
-        # Get the first JSON file inside zip
+    url = "https://raw.githubusercontent.com/Ganeshkumar-byte/GC-MS/main/MoNA-export-GC-MS_Spectra-json.zip"
+
+    response = requests.get(url)
+    response.raise_for_status()
+
+    with zipfile.ZipFile(io.BytesIO(response.content)) as z:
         json_filename = [f for f in z.namelist() if f.endswith('.json')][0]
 
         with z.open(json_filename) as f:
             return json.load(f)
-
 
 # ---------------- MATCH FUNCTION ---------------- #
 def calculate_match_factor(query_peaks, library_peaks):
