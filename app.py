@@ -1,57 +1,150 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
+import json
 
-def main():
-    st.title("Retention Time Analysis App")
-    st.write("Upload your Excel database and enter a retention time to find the closest peaks.")
+# ---------------- MATCH FUNCTION ---------------- #
+def calculate_match_factor(query_peaks, library_peaks):
+    all_mz = set(query_peaks.keys()).union(set(library_peaks.keys()))
 
-    # Upload Excel file
-    uploaded_file = st.file_uploader("Choose an Excel file", type="xlsx")
+    numerator = 0
+    sum_q_sq = 0
+    sum_l_sq = 0
 
-    if uploaded_file is not None:
-        df = pd.read_excel(uploaded_file)
+    for mz in all_mz:
+        q_int = query_peaks.get(mz, 0)
+        l_int = library_peaks.get(mz, 0)
 
-        # Convert 'Retention Time' column to numeric, coercing errors to NaN
-        # Assuming 'Retention Time' and 'Compound Name' are the correct column headers after loading
-        if 'Retention Time' in df.columns and 'Compound Name' in df.columns:
-            df['Retention Time'] = pd.to_numeric(df['Retention Time'], errors='coerce')
-            df.dropna(subset=['Retention Time'], inplace=True)
+        w_q = (mz ** 0.5) * (q_int ** 0.5)
+        w_l = (mz ** 0.5) * (l_int ** 0.5)
 
-            # Input retention time using Streamlit's number_input
-            input_rt = st.number_input("Enter retention time:", value=0.0, format="%.4f")
+        numerator += (w_q * w_l)
+        sum_q_sq += (w_q ** 2)
+        sum_l_sq += (w_l ** 2)
 
-            if input_rt > 0:
-                # Calculate difference
-                df['diff'] = (df['Retention Time'] - input_rt).abs()
+    if sum_q_sq == 0 or sum_l_sq == 0:
+        return 0
 
-                # Get 3 closest peaks
-                closest_peaks = df.sort_values(by='diff').head(3)
+    score = (numerator**2) / (sum_q_sq * sum_l_sq)
+    return round(score * 1000)
 
-                # Rename columns for display
-                closest_peaks_display = closest_peaks.rename(columns={'Compound Name': 'NAME', 'Retention Time': 'RETENTION TIME'})
 
-                st.subheader("Nearest 3 Peaks:")
-                st.dataframe(closest_peaks_display[['NAME', 'RETENTION TIME']])
+# ---------------- PARSE FUNCTIONS ---------------- #
+def parse_spectrum_string(spectrum_str):
+    peaks_dict = {}
 
-                # Check for exact match
-                exact_match_found = (df['Retention Time'] == input_rt).any()
+    if not isinstance(spectrum_str, str):
+        return peaks_dict
 
-                if exact_match_found:
-                    matched_entries = df[df['Retention Time'] == input_rt]
-                    matched_names = matched_entries['Compound Name'].tolist()
-                    st.info(f"Statement: The input retention time ({input_rt}) has an exact match for {', '.join(matched_names)}.")
-                else:
-                    st.warning(f"Statement: No exact retention time match found for {input_rt} in the database. The elution will vary if the specified GC instrument and column conditions are not met, or if no exact match exists.")
+    for peak_pair in spectrum_str.split(' '):
+        if ':' in peak_pair:
+            mz_str, intensity_str = peak_pair.split(':')
+            try:
+                mz = int(float(mz_str))
+                intensity = float(intensity_str)
+                peaks_dict[mz] = intensity
+            except:
+                continue
 
-                st.markdown("\n--- Notes ---")
-                st.write("This database was developed under the following conditions:")
-                st.write("Conditions Instrument: GC-2010 Column: SH-200, 60 m, 0.32 mm ID, 1.00 μm (P/N: 227-36186-02) Injection: Split (split ratio: 50:1)Inj. Temp: 250 °C Carrier Gas: He, constant linear velocity mode, 25 cm/sec Oven Temp: 40 °C (0 min) to 310 °C at 4 °C/min Detector: FID, 330 °C")
-            else:
-                st.info("Please enter a retention time to analyze.")
-        else:
-            st.error("The uploaded Excel file must contain 'Retention Time' and 'Compound Name' columns.")
+    return peaks_dict
+
+
+def parse_user_input(input_text):
+    peaks = {}
+    pairs = input_text.split(',')
+
+    for pair in pairs:
+        if ':' in pair:
+            try:
+                mz, intensity = pair.split(':')
+                peaks[int(float(mz.strip()))] = float(intensity.strip())
+            except:
+                continue
+
+    return peaks
+
+
+# ---------------- MATCH SEARCH ---------------- #
+def find_top_matches(manual_data, json_file):
+    database = json.load(json_file)
+
+    results = []
+
+    if isinstance(database, dict):
+        compounds_to_process = database.values()
+    elif isinstance(database, list):
+        compounds_to_process = database
     else:
-        st.info("Please upload your Excel file to begin.")
+        return pd.DataFrame()
 
-if __name__ == '__main__':
-    main()
+    for compound_entry in compounds_to_process:
+
+        if not isinstance(compound_entry, dict):
+            continue
+
+        # Extract compound details
+        if 'compound' in compound_entry and len(compound_entry['compound']) > 0:
+            actual = compound_entry['compound'][0]
+        else:
+            actual = {}
+
+        # Name
+        name = 'Unknown'
+        if 'names' in actual and len(actual['names']) > 0:
+            name = actual['names'][0].get('name', 'Unknown')
+
+        # Formula
+        formula = 'N/A'
+        if 'metaData' in actual:
+            for item in actual['metaData']:
+                if item.get('name') == 'molecular formula':
+                    formula = item.get('value', 'N/A')
+                    break
+
+        # Spectrum
+        spectrum_str = compound_entry.get('spectrum', '')
+        library_peaks = parse_spectrum_string(spectrum_str)
+
+        score = calculate_match_factor(manual_data, library_peaks)
+
+        results.append({
+            "Name": name,
+            "Formula": formula,
+            "Match Score": score
+        })
+
+    df = pd.DataFrame(results)
+    return df.sort_values(by="Match Score", ascending=False).head(5)
+
+
+# ---------------- STREAMLIT UI ---------------- #
+st.set_page_config(page_title="GC-MS Matcher", layout="centered")
+
+st.title("🔬 GC-MS Spectral Matcher")
+st.write("Enter peaks in format: `m/z:intensity` separated by commas")
+
+# User input
+user_input = st.text_area(
+    "Enter Peaks",
+    value="43:100, 70:12, 61:11, 88:3, 41:8, 42:6"
+)
+
+# Upload JSON file
+uploaded_file = st.file_uploader("Upload MoNA JSON File", type=["json"])
+
+# Run button
+if st.button("Find Matches"):
+
+    if not user_input:
+        st.warning("Please enter peak values.")
+    elif uploaded_file is None:
+        st.warning("Please upload a JSON database.")
+    else:
+        with st.spinner("Processing..."):
+
+            query_peaks = parse_user_input(user_input)
+            matches = find_top_matches(query_peaks, uploaded_file)
+
+            st.success("Top Matches Found!")
+
+            st.dataframe(matches)
