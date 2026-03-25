@@ -17,8 +17,8 @@ def load_database():
 
         with zipfile.ZipFile(io.BytesIO(response.content)) as z:
 
-            # ✅ Exact path inside your ZIP
-            json_path = "MoNA-export-GC-MS_Spectra-json/MoNA-export-GC-MS_Spectra.json"
+            # ✅ Correct file path (based on your debug output)
+            json_path = "MoNA-export-GC-MS_Spectra.json"
 
             if json_path not in z.namelist():
                 st.error("❌ JSON file not found inside ZIP")
