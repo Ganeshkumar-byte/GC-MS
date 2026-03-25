@@ -3,6 +3,20 @@ import pandas as pd
 import numpy as np
 import json
 
+# ---------------- LOAD DATABASE (FROM GITHUB REPO FILE) ---------------- #
+import zipfile
+import json
+
+@st.cache_data
+def load_database():
+    with zipfile.ZipFile("MoNA-export-GC-MS_Spectra.zip", 'r') as z:
+        # Get the first JSON file inside zip
+        json_filename = [f for f in z.namelist() if f.endswith('.json')][0]
+
+        with z.open(json_filename) as f:
+            return json.load(f)
+
+
 # ---------------- MATCH FUNCTION ---------------- #
 def calculate_match_factor(query_peaks, library_peaks):
     all_mz = set(query_peaks.keys()).union(set(library_peaks.keys()))
@@ -38,8 +52,8 @@ def parse_spectrum_string(spectrum_str):
 
     for peak_pair in spectrum_str.split(' '):
         if ':' in peak_pair:
-            mz_str, intensity_str = peak_pair.split(':')
             try:
+                mz_str, intensity_str = peak_pair.split(':')
                 mz = int(float(mz_str))
                 intensity = float(intensity_str)
                 peaks_dict[mz] = intensity
@@ -65,17 +79,14 @@ def parse_user_input(input_text):
 
 
 # ---------------- MATCH SEARCH ---------------- #
-def find_top_matches(manual_data, json_file):
-    database = json.load(json_file)
+def find_top_matches(manual_data, database):
 
     results = []
 
     if isinstance(database, dict):
         compounds_to_process = database.values()
-    elif isinstance(database, list):
-        compounds_to_process = database
     else:
-        return pd.DataFrame()
+        compounds_to_process = database
 
     for compound_entry in compounds_to_process:
 
@@ -121,30 +132,28 @@ def find_top_matches(manual_data, json_file):
 st.set_page_config(page_title="GC-MS Matcher", layout="centered")
 
 st.title("🔬 GC-MS Spectral Matcher")
-st.write("Enter peaks in format: `m/z:intensity` separated by commas")
 
-# User input
+st.write("Enter peaks like: `43:100, 70:12, 61:11`")
+
+# Input
 user_input = st.text_area(
-    "Enter Peaks",
-    value="43:100, 70:12, 61:11, 88:3, 41:8, 42:6"
+    "Enter m/z : intensity values",
+    "43:100, 70:12, 61:11, 88:3, 41:8, 42:6"
 )
 
-# Upload JSON file
-uploaded_file = st.file_uploader("Upload MoNA JSON File", type=["json"])
+# Load database once
+database = load_database()
 
-# Run button
+# Button
 if st.button("Find Matches"):
 
     if not user_input:
         st.warning("Please enter peak values.")
-    elif uploaded_file is None:
-        st.warning("Please upload a JSON database.")
     else:
-        with st.spinner("Processing..."):
+        with st.spinner("Matching spectra..."):
 
             query_peaks = parse_user_input(user_input)
-            matches = find_top_matches(query_peaks, uploaded_file)
+            matches = find_top_matches(query_peaks, database)
 
             st.success("Top Matches Found!")
-
             st.dataframe(matches)
