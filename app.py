@@ -1,22 +1,39 @@
-
-import zipfile
+import streamlit as st
+import pandas as pd
+import numpy as np
 import json
+import zipfile
 import requests
 import io
-import streamlit as st
 
+# ---------------- LOAD DATABASE FROM GITHUB ZIP ---------------- #
 @st.cache_data
 def load_database():
     url = "https://raw.githubusercontent.com/Ganeshkumar-byte/GC-MS/main/MoNA-export-GC-MS_Spectra-json.zip"
 
-    response = requests.get(url)
-    response.raise_for_status()
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
 
-    with zipfile.ZipFile(io.BytesIO(response.content)) as z:
-        json_filename = [f for f in z.namelist() if f.endswith('.json')][0]
+        with zipfile.ZipFile(io.BytesIO(response.content)) as z:
 
-        with z.open(json_filename) as f:
-            return json.load(f)
+            # ✅ Exact path inside your ZIP
+            json_path = "MoNA-export-GC-MS_Spectra-json/MoNA-export-GC-MS_Spectra.json"
+
+            if json_path not in z.namelist():
+                st.error("❌ JSON file not found inside ZIP")
+                st.write("Files inside ZIP:", z.namelist())
+                return []
+
+            with z.open(json_path) as f:
+                data = json.load(f)
+
+        return data
+
+    except Exception as e:
+        st.error(f"Error loading database: {e}")
+        return []
+
 
 # ---------------- MATCH FUNCTION ---------------- #
 def calculate_match_factor(query_peaks, library_peaks):
@@ -86,44 +103,59 @@ def find_top_matches(manual_data, database):
 
     if isinstance(database, dict):
         compounds_to_process = database.values()
-    else:
+    elif isinstance(database, list):
         compounds_to_process = database
+    else:
+        st.error(f"Unexpected database type: {type(database)}")
+        return pd.DataFrame()
 
     for compound_entry in compounds_to_process:
 
         if not isinstance(compound_entry, dict):
             continue
 
-        # Extract compound details
-        if 'compound' in compound_entry and len(compound_entry['compound']) > 0:
-            actual = compound_entry['compound'][0]
-        else:
-            actual = {}
+        try:
+            # Extract compound details
+            if 'compound' in compound_entry and len(compound_entry['compound']) > 0:
+                actual = compound_entry['compound'][0]
+            else:
+                actual = {}
 
-        # Name
-        name = 'Unknown'
-        if 'names' in actual and len(actual['names']) > 0:
-            name = actual['names'][0].get('name', 'Unknown')
+            # Name
+            name = 'Unknown'
+            if 'names' in actual and len(actual['names']) > 0:
+                name = actual['names'][0].get('name', 'Unknown')
 
-        # Formula
-        formula = 'N/A'
-        if 'metaData' in actual:
-            for item in actual['metaData']:
-                if item.get('name') == 'molecular formula':
-                    formula = item.get('value', 'N/A')
-                    break
+            # Formula
+            formula = 'N/A'
+            if 'metaData' in actual:
+                for item in actual['metaData']:
+                    if item.get('name') == 'molecular formula':
+                        formula = item.get('value', 'N/A')
+                        break
 
-        # Spectrum
-        spectrum_str = compound_entry.get('spectrum', '')
-        library_peaks = parse_spectrum_string(spectrum_str)
+            # Spectrum
+            spectrum_str = compound_entry.get('spectrum', '')
+            library_peaks = parse_spectrum_string(spectrum_str)
 
-        score = calculate_match_factor(manual_data, library_peaks)
+            if not library_peaks:
+                continue
 
-        results.append({
-            "Name": name,
-            "Formula": formula,
-            "Match Score": score
-        })
+            score = calculate_match_factor(manual_data, library_peaks)
+
+            results.append({
+                "Name": name,
+                "Formula": formula,
+                "Match Score": score
+            })
+
+        except:
+            continue
+
+    # ✅ Prevent crash if empty
+    if len(results) == 0:
+        st.warning("⚠️ No matches found. Check your input or database.")
+        return pd.DataFrame(columns=["Name", "Formula", "Match Score"])
 
     df = pd.DataFrame(results)
     return df.sort_values(by="Match Score", ascending=False).head(5)
@@ -136,16 +168,24 @@ st.title("🔬 GC-MS Spectral Matcher")
 
 st.write("Enter peaks like: `43:100, 70:12, 61:11`")
 
-# Input
+# User input
 user_input = st.text_area(
     "Enter m/z : intensity values",
     "43:100, 70:12, 61:11, 88:3, 41:8, 42:6"
 )
 
-# Load database once
-database = load_database()
+# Load database
+with st.spinner("Loading database..."):
+    database = load_database()
 
-# Button
+# Check database
+if not database:
+    st.error("❌ Database failed to load. Check ZIP or URL.")
+    st.stop()
+else:
+    st.success(f"✅ Database loaded ({len(database)} entries)")
+
+# Run match
 if st.button("Find Matches"):
 
     if not user_input:
@@ -154,7 +194,11 @@ if st.button("Find Matches"):
         with st.spinner("Matching spectra..."):
 
             query_peaks = parse_user_input(user_input)
-            matches = find_top_matches(query_peaks, database)
 
-            st.success("Top Matches Found!")
-            st.dataframe(matches)
+            if not query_peaks:
+                st.error("Invalid input format!")
+            else:
+                matches = find_top_matches(query_peaks, database)
+
+                st.success("Top Matches Found!")
+                st.dataframe(matches)
