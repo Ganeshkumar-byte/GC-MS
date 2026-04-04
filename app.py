@@ -173,7 +173,7 @@ st.set_page_config(
 col1, col2 = st.columns([1, 4])
 
 with col1:
-    st.image("logo.png", width=80)   # make sure logo file name matches
+    st.image("logo.jpg", width=80)   # make sure logo file name matches
 
 with col2:
     st.markdown("## Entity 1")
