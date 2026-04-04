@@ -162,9 +162,22 @@ def find_top_matches(manual_data, database):
 
 
 # ---------------- STREAMLIT UI ---------------- #
-st.set_page_config(page_title="GC-MS Matcher", layout="centered")
 
-st.title("🔬 GC-MS Spectral Matcher")
+# Page config (tab title + layout)
+st.set_page_config(
+    page_title="Entity 1",
+    layout="centered"
+)
+
+# ---- HEADER WITH LOGO ----
+col1, col2 = st.columns([1, 4])
+
+with col1:
+    st.image("logo.png", width=80)   # make sure logo file name matches
+
+with col2:
+    st.markdown("## Entity 1")
+    st.markdown("### GC-MS Spectral Matcher")
 
 st.write("Enter peaks like: `43:100, 70:12, 61:11`")
 
