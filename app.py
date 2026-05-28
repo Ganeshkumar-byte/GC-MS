@@ -165,7 +165,7 @@ def find_top_matches(manual_data, database):
 
 # Page config (tab title + layout)
 st.set_page_config(
-    page_title="Entity 1",
+    page_title="Entity 1 by sathish",
     layout="centered"
 )
 
